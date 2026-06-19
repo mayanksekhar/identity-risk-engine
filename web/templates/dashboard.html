@@ -1,0 +1,104 @@
+{{define "dashboard.html"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Identity Risk Engine | Thinkwerke</title>
+  <link rel="stylesheet" href="/static/css/dashboard.css">
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">▌▌</span>
+        <span class="brand-name">IDENTITY<span class="accent">RISK</span></span>
+      </div>
+      <nav>
+        <a class="nav-item active" href="/">Dashboard</a>
+        <a class="nav-item" href="/api/v1/identities">API: Identities</a>
+        <a class="nav-item" href="/api/v1/summary">API: Summary</a>
+        <a class="nav-item" href="/healthz">Health</a>
+      </nav>
+      <div class="sidebar-footer">
+        <span class="dim">served by</span>
+        <code>{{.BackendHost}}</code>
+      </div>
+    </aside>
+
+    <main class="content">
+      <header class="page-header">
+        <div>
+          <h1>Identity Risk Engine</h1>
+          <p class="subtitle">{{.Summary.TotalIdentities}} identities under management &middot; generated {{.GeneratedAt}}</p>
+        </div>
+      </header>
+
+      <section class="cards">
+        <div class="card">
+          <div class="card-label">Human Identities</div>
+          <div class="card-value">{{.Summary.HumanCount}}</div>
+        </div>
+        <div class="card">
+          <div class="card-label">NHI Identities</div>
+          <div class="card-value">{{.Summary.NHICount}}</div>
+        </div>
+        <div class="card">
+          <div class="card-label">AI Agents</div>
+          <div class="card-value">{{.Summary.AgentCount}}</div>
+        </div>
+        <div class="card card-warn">
+          <div class="card-label">High / Critical Risk</div>
+          <div class="card-value">{{.Summary.AnomalyCount}}</div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Weekly MFA Challenges</h2>
+        <div class="bar-chart">
+          {{range .WeeklyEvents}}
+          <div class="bar-col">
+            <div class="bar" style="height: {{.Value}}%;" title="{{.Value}}"></div>
+            <span class="bar-label">{{.Label}}</span>
+          </div>
+          {{end}}
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Identities by Risk</h2>
+        <table class="risk-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Type</th>
+              <th>Auth</th>
+              <th>Privilege</th>
+              <th>Last Active</th>
+              <th>Score</th>
+              <th>Severity</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .Results}}
+            <tr>
+              <td>
+                <div class="id-name">{{.Identity.Name}}</div>
+                <div class="id-sub">{{.Identity.Department}}</div>
+              </td>
+              <td><span class="pill pill-type-{{.Identity.Type}}">{{.Identity.Type}}</span></td>
+              <td>{{.Identity.AuthMethod}}</td>
+              <td>{{.Identity.Privilege}}</td>
+              <td>{{.Identity.LastActiveAt.Format "Jan 02, 15:04"}}</td>
+              <td class="score-cell">{{.Score.Total}}</td>
+              <td><span class="pill pill-sev-{{.Score.Severity}}">{{.Score.Severity}}</span></td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </section>
+    </main>
+  </div>
+</body>
+</html>
+{{end}}

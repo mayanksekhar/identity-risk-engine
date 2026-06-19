@@ -1,0 +1,14 @@
+bin/
+coverage.out
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+*.tfvars
+!example.tfvars
+.env
+*.log
+.DS_Store
+kubeconfig*
+*.pem
+*.key
