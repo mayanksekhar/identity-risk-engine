@@ -86,8 +86,8 @@ source-sbom:
     name: anchore/syft:debug
     entrypoint: [""]
   script:
-    - syft dir:. -o cyclonedx-json=sbom-source.cdx.json
-    - syft dir:. -o spdx-json=sbom-source.spdx.json
+    - /syft dir:. -o cyclonedx-json=sbom-source.cdx.json
+    - /syft dir:. -o spdx-json=sbom-source.spdx.json
   artifacts:
     paths:
       - sbom-source.cdx.json
@@ -134,7 +134,7 @@ image-sbom:
     SYFT_REGISTRY_AUTH_USERNAME: "$CI_REGISTRY_USER"
     SYFT_REGISTRY_AUTH_PASSWORD: "$CI_REGISTRY_PASSWORD"
   script:
-    - syft "$IMAGE_TAG" -o cyclonedx-json=sbom-image.cdx.json
+    - /syft "$IMAGE_TAG" -o cyclonedx-json=sbom-image.cdx.json
   artifacts:
     paths:
       - sbom-image.cdx.json
@@ -151,7 +151,7 @@ grype-gate:
     - job: image-sbom
       artifacts: true
   script:
-    - grype sbom:sbom-image.cdx.json --fail-on high -o table
+    - /grype sbom:sbom-image.cdx.json --fail-on high -o table
   tags:
     - devsecops
 
