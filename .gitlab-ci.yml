@@ -83,7 +83,7 @@ source-fs-scan:
 source-sbom:
   stage: source-sbom
   image:
-    name: anchore/syft:latest
+    name: anchore/syft:latest-debug
     entrypoint: [""]
   script:
     - syft dir:. -o cyclonedx-json=sbom-source.cdx.json
@@ -126,7 +126,7 @@ image-build:
 image-sbom:
   stage: image-scan
   image:
-    name: anchore/syft:latest
+    name: anchore/syft:latest-debug
     entrypoint: [""]
   needs:
     - image-build
@@ -145,7 +145,7 @@ image-sbom:
 grype-gate:
   stage: image-scan
   image:
-    name: anchore/grype:latest
+    name: anchore/grype:latest-debug
     entrypoint: [""]
   needs:
     - job: image-sbom
@@ -181,9 +181,7 @@ trivy-image-gate:
 # ---------------------------------------------------------------------------
 sign-attest:
   stage: sign-attest
-  image:
-    name: gcr.io/projectsigstore/cosign:v3.0.6
-    entrypoint: [""]
+  image: alpine:latest
   id_tokens:
     SIGSTORE_ID_TOKEN:
       aud: sigstore
@@ -192,6 +190,8 @@ sign-attest:
       artifacts: true
     - job: grype-gate
     - job: trivy-image-gate
+  before_script:
+    - apk add --no-cache --update cosign docker-cli
   script:
     - cosign login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
     - cosign sign --yes "$IMAGE_TAG"
