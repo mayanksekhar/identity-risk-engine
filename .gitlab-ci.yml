@@ -207,17 +207,15 @@ sign-attest:
 # spend only happens when you intend it to (consistent with the
 # demo-first-teardown pattern from Project 1).
 # ---------------------------------------------------------------------------
-deploy:
+deploy-apply:
   stage: deploy
-  image:
-    name: hashicorp/terraform:1.9
-    entrypoint: [""]
+  image: hashicorp/terraform:1.9
   needs:
     - sign-attest
+  when: manual
   script:
     - echo "Deploy stage placeholder - see deploy/terraform for the EKS/ECS weighted-ALB apply"
-    - echo "Intentionally manual: cloud resources are ephemeral, stood up for demo and torn down after"
-  when: manual
+    - echo "Intentionally manual - cloud resources are ephemeral, stood up for demo and torn down after"
   tags:
     - devsecops
 
