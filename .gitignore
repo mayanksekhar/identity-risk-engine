@@ -12,3 +12,6 @@ coverage.out
 kubeconfig*
 *.pem
 *.key
+*.cdx.json
+*.spdx.json
+coverage.out
