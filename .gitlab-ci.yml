@@ -83,7 +83,7 @@ source-fs-scan:
 source-sbom:
   stage: source-sbom
   image:
-    name: anchore/syft:latest-debug
+    name: anchore/syft:debug
     entrypoint: [""]
   script:
     - syft dir:. -o cyclonedx-json=sbom-source.cdx.json
@@ -126,7 +126,7 @@ image-build:
 image-sbom:
   stage: image-scan
   image:
-    name: anchore/syft:latest-debug
+    name: anchore/syft:debug
     entrypoint: [""]
   needs:
     - image-build
@@ -145,7 +145,7 @@ image-sbom:
 grype-gate:
   stage: image-scan
   image:
-    name: anchore/grype:latest-debug
+    name: anchore/grype:debug
     entrypoint: [""]
   needs:
     - job: image-sbom
