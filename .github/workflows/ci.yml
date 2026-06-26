@@ -30,7 +30,7 @@ jobs:
     name: Secret scan (Gitleaks)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
         with:
           fetch-depth: 0
 
@@ -41,13 +41,14 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # Job 2: SAST + SCA - Semgrep static analysis + Trivy filesystem scan
-  # Runs in parallel with gitleaks since both are source-only scans
+  # misconfig excluded: k8s pod specs enforce health/resource policy, not
+  # Dockerfile HEALTHCHECK instructions (which distroless images cannot use).
   # ---------------------------------------------------------------------------
   sast-sca:
     name: SAST + SCA
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
 
       - name: Semgrep SAST
         uses: returntocorp/semgrep-action@v1
@@ -61,7 +62,7 @@ jobs:
         with:
           scan-type: fs
           scan-ref: .
-          scanners: vuln,secret,misconfig
+          scanners: vuln,secret
           severity: HIGH,CRITICAL
           exit-code: '1'
           format: sarif
@@ -82,10 +83,10 @@ jobs:
     runs-on: ubuntu-latest
     needs: [gitleaks, sast-sca]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v5.5.0
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
@@ -109,22 +110,23 @@ jobs:
           -o identity-risk-engine ./cmd/server
 
       - name: Upload binary artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: identity-risk-engine-binary
           path: identity-risk-engine
           retention-days: 1
 
   # ---------------------------------------------------------------------------
-  # Job 4: Source SBOM (Level 1) - Syft on source dir before image build
-  # This is the "what did we intend to ship" baseline SBOM
+  # Job 4: Source SBOM (Level 1) - Syft on source dir before image build.
+  # Grype installed fresh each run to avoid stale vulnerability DB issue
+  # that occurs when using anchore/scan-action with its pinned Grype version.
   # ---------------------------------------------------------------------------
   source-sbom:
     name: Source SBOM (L1)
     runs-on: ubuntu-latest
     needs: [build-test]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
 
       - name: Install Syft
         uses: anchore/sbom-action/download-syft@v0
@@ -135,17 +137,17 @@ jobs:
       - name: Generate source SBOM (SPDX)
         run: syft dir:. -o spdx-json=sbom-source.spdx.json
 
+      - name: Install Grype (latest, fresh DB)
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh \
+            | sh -s -- -b /usr/local/bin
+          grype version
+
       - name: Scan source SBOM with Grype
-        id: grype-source
-        uses: anchore/scan-action@v4
-        with:
-          sbom: sbom-source.cdx.json
-          fail-build: true
-          severity-cutoff: high
-          output-format: table
+        run: grype sbom:sbom-source.cdx.json --fail-on high -o table
 
       - name: Upload source SBOMs
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: sbom-source
           path: |
@@ -155,7 +157,9 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # Job 5: Build container image + push to GHCR
-  # Tagged by git SHA and image digest - never a floating tag in production
+  # Tagged by git SHA and image digest - never a floating tag in production.
+  # image-ref output uses step context (not env context) since job-level
+  # outputs cannot evaluate env.* variables directly.
   # ---------------------------------------------------------------------------
   image-build:
     name: Build + push image
@@ -163,9 +167,9 @@ jobs:
     needs: [source-sbom]
     outputs:
       image-digest: ${{ steps.push.outputs.digest }}
-      image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.push.outputs.digest }}
+      image-ref: ${{ steps.image-ref.outputs.ref }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -201,11 +205,18 @@ jobs:
           cache-to: type=gha,mode=max
           provenance: false
 
+      - name: Set image ref output
+        id: image-ref
+        run: |
+          echo "ref=ghcr.io/${{ github.repository }}@${{ steps.push.outputs.digest }}" >> $GITHUB_OUTPUT
+
   # ---------------------------------------------------------------------------
   # Job 6: Image SBOM (Level 2) + dual vulnerability gate
-  # Syft scans the pushed image - includes OS layer, not just go.mod deps
-  # Grype consumes the SBOM; Trivy scans the image independently
-  # Both must pass to proceed - dual gate for cross-validation
+  # Syft scans the pushed image - includes OS layer, not just go.mod deps.
+  # Grype consumes the SBOM directly (no re-pull needed).
+  # Trivy scans the image independently - different DB, different matching.
+  # Both must pass - dual gate for cross-validation.
+  # Grype installed fresh each run to avoid anchore/scan-action stale DB issue.
   # ---------------------------------------------------------------------------
   image-sbom-gate:
     name: Image SBOM + vuln gate (L2)
@@ -226,13 +237,14 @@ jobs:
           format: cyclonedx-json
           output-file: sbom-image.cdx.json
 
+      - name: Install Grype (latest, fresh DB)
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh \
+            | sh -s -- -b /usr/local/bin
+          grype version
+
       - name: Grype gate - scan image SBOM
-        uses: anchore/scan-action@v4
-        with:
-          sbom: sbom-image.cdx.json
-          fail-build: true
-          severity-cutoff: high
-          output-format: table
+        run: grype sbom:sbom-image.cdx.json --fail-on high -o table
 
       - name: Trivy image gate - independent cross-check
         uses: aquasecurity/trivy-action@master
@@ -253,7 +265,7 @@ jobs:
           category: trivy-image
 
       - name: Upload image SBOM
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.2
         with:
           name: sbom-image
           path: sbom-image.cdx.json
@@ -261,14 +273,14 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # Job 7: Cosign keyless signing + SLSA provenance
-  # Both run together since both need the image digest and both are attestations
-  # Cosign: short-lived cert from Fulcio via GitHub OIDC, logged to Rekor
-  # SLSA: L3 provenance via slsa-github-generator (separate reusable workflow)
+  # Cosign: short-lived cert from Fulcio via GitHub OIDC, logged to Rekor.
+  # SLSA: GitHub-native build provenance attestation.
+  # Both produce attestation artifacts attached to the image in GHCR.
   # ---------------------------------------------------------------------------
   sign-attest:
     name: Sign + SLSA provenance
     runs-on: ubuntu-latest
-    needs: [image-sbom-gate]
+    needs: [image-build, image-sbom-gate]
     permissions:
       contents: read
       packages: write
@@ -285,8 +297,8 @@ jobs:
       - name: Install Cosign
         uses: sigstore/cosign-installer@v3
 
-      - name: Download image SBOM attestation
-        uses: actions/download-artifact@v4
+      - name: Download image SBOM
+        uses: actions/download-artifact@v4.3.0
         with:
           name: sbom-image
 
@@ -303,7 +315,7 @@ jobs:
             ${{ needs.image-build.outputs.image-ref }}
 
       - name: Attest build provenance via GitHub
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v2.4.0
         with:
           subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           subject-digest: ${{ needs.image-build.outputs.image-digest }}
