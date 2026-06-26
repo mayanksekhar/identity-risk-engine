@@ -147,7 +147,7 @@ jobs:
         run: grype sbom:sbom-source.cdx.json --fail-on high -o table
 
       - name: Upload source SBOMs
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.3.0
         with:
           name: sbom-source
           path: |
