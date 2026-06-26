@@ -26,7 +26,7 @@ jobs:
     name: Rescan production image
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -74,7 +74,7 @@ jobs:
 
       - name: Open GitHub issue if new HIGH/CRITICAL found
         if: env.GRYPE_FAILED == 'true'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v7.0.1
         with:
           script: |
             const fs = require('fs');
