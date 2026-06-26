@@ -1,0 +1,102 @@
+name: Scheduled rescan - Production drift detection
+
+on:
+  schedule:
+    # Every Monday at 06:00 UTC - before EU business day starts
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+    inputs:
+      image-digest:
+        description: 'Specific image digest to rescan (optional - defaults to latest)'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  packages: read
+  security-events: write
+  issues: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  rescan:
+    name: Rescan production image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve image ref
+        id: image
+        run: |
+          if [ -n "${{ github.event.inputs.image-digest }}" ]; then
+            echo "ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ github.event.inputs.image-digest }}" >> $GITHUB_OUTPUT
+          else
+            echo "ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Trivy rescan
+        id: trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ steps.image.outputs.ref }}
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          format: sarif
+          output: trivy-rescan.sarif
+
+      - name: Upload Trivy rescan SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-rescan.sarif
+          category: trivy-scheduled-rescan
+
+      - name: Grype rescan
+        id: grype
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh \
+            | sh -s -- -b /usr/local/bin
+          grype ${{ steps.image.outputs.ref }} \
+            --fail-on high \
+            -o json > grype-rescan.json 2>&1 || echo "GRYPE_FAILED=true" >> $GITHUB_ENV
+          grype ${{ steps.image.outputs.ref }} --fail-on high -o table || true
+
+      - name: Open GitHub issue if new HIGH/CRITICAL found
+        if: env.GRYPE_FAILED == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let summary = 'Grype found HIGH/CRITICAL vulnerabilities in the production image.';
+            try {
+              const results = JSON.parse(fs.readFileSync('grype-rescan.json', 'utf8'));
+              const matches = results.matches || [];
+              const high = matches.filter(m => ['High','Critical'].includes(m.vulnerability?.severity));
+              summary = `Grype found ${high.length} HIGH/CRITICAL vulnerabilities:\n\n` +
+                high.slice(0,10).map(m =>
+                  `- **${m.vulnerability?.id}** (${m.vulnerability?.severity}): ${m.artifact?.name}@${m.artifact?.version}`
+                ).join('\n');
+            } catch(e) {}
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `[SECURITY] Scheduled rescan found new vulnerabilities - ${new Date().toISOString().split('T')[0]}`,
+              body: `## Scheduled Production Image Rescan\n\n${summary}\n\n` +
+                `**Image:** \`${{ steps.image.outputs.ref }}\`\n` +
+                `**Run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\n\n` +
+                `This issue was automatically created by the weekly scheduled rescan workflow.\n` +
+                `Please remediate within the SLA defined in the RFC (docs/rfc-sbom-gated-pipeline.md).`,
+              labels: ['security', 'vulnerability', 'automated']
+            });

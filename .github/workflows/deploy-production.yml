@@ -1,0 +1,156 @@
+name: Deploy - Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      image-digest:
+        description: 'Image digest to deploy (sha256:...) - must have passed staging gate'
+        required: true
+        type: string
+      confirm:
+        description: 'Type DEPLOY to confirm production deployment'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: read
+  id-token: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Safety check - confirms the human typed DEPLOY explicitly
+  # Prevents accidental trigger via workflow_dispatch with empty inputs
+  # ---------------------------------------------------------------------------
+  confirm-intent:
+    name: Confirm deployment intent
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate confirmation string
+        run: |
+          if [ "${{ github.event.inputs.confirm }}" != "DEPLOY" ]; then
+            echo "Deployment not confirmed. Input '${{ github.event.inputs.confirm }}' != 'DEPLOY'"
+            exit 1
+          fi
+          echo "Deployment confirmed by ${{ github.actor }}"
+
+  # ---------------------------------------------------------------------------
+  # Pre-flight: re-verify signature + SBOM attestation before production touch
+  # Even though this passed in staging, we verify again here - the production
+  # gate is independent and does not trust staging's claim alone.
+  # ---------------------------------------------------------------------------
+  pre-flight-verify:
+    name: Pre-flight signature verify
+    runs-on: ubuntu-latest
+    needs: [confirm-intent]
+    steps:
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify image signature
+        run: |
+          IMAGE_REF="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ github.event.inputs.image-digest }}"
+          cosign verify \
+            --certificate-identity-regexp "https://github.com/${{ github.repository }}.*" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            "$IMAGE_REF"
+          echo "Production pre-flight: signature verified for $IMAGE_REF"
+
+      - name: Verify SBOM attestation
+        run: |
+          IMAGE_REF="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ github.event.inputs.image-digest }}"
+          cosign verify-attestation \
+            --type cyclonedx \
+            --certificate-identity-regexp "https://github.com/${{ github.repository }}.*" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            "$IMAGE_REF" \
+            | jq -r '.payload | @base64d | fromjson | .predicateType'
+          echo "Production pre-flight: SBOM attestation verified"
+
+  # ---------------------------------------------------------------------------
+  # Production deploy - 80% EKS, 20% ECS via weighted ALB target groups
+  # Applies the Terraform-managed weighted target group split
+  # ---------------------------------------------------------------------------
+  deploy-production:
+    name: Deploy to production (80/20 EKS/ECS)
+    runs-on: ubuntu-latest
+    needs: [pre-flight-verify]
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Update kubeconfig for EKS production
+        run: |
+          aws eks update-kubeconfig \
+            --name ${{ secrets.EKS_CLUSTER_NAME_PROD }} \
+            --region ${{ secrets.AWS_REGION }}
+
+      - name: Deploy to EKS production namespace (80% traffic)
+        run: |
+          IMAGE_REF="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ github.event.inputs.image-digest }}"
+          kubectl set image deployment/identity-risk-engine \
+            identity-risk-engine="$IMAGE_REF" \
+            -n production
+          kubectl rollout status deployment/identity-risk-engine \
+            -n production --timeout=180s
+          echo "EKS production deploy complete"
+
+      - name: Update ECS task definition (20% traffic)
+        run: |
+          IMAGE_REF="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ github.event.inputs.image-digest }}"
+          TASK_DEF=$(aws ecs describe-task-definition \
+            --task-definition identity-risk-engine \
+            --query 'taskDefinition' \
+            --output json)
+          NEW_TASK_DEF=$(echo "$TASK_DEF" | \
+            jq --arg IMAGE "$IMAGE_REF" \
+            '.containerDefinitions[0].image = $IMAGE |
+             del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)')
+          aws ecs register-task-definition \
+            --cli-input-json "$NEW_TASK_DEF"
+          aws ecs update-service \
+            --cluster ${{ secrets.ECS_CLUSTER_NAME }} \
+            --service identity-risk-engine \
+            --task-definition identity-risk-engine
+          echo "ECS production deploy complete"
+
+      - name: Production health check
+        run: |
+          for i in $(seq 1 12); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              ${{ secrets.PROD_ALB_URL }}/healthz || echo "000")
+            if [ "$STATUS" = "200" ]; then
+              echo "Production health check passed"
+              exit 0
+            fi
+            echo "Attempt $i: got $STATUS, waiting 15s..."
+            sleep 15
+          done
+          echo "Production health check failed - consider rollback"
+          exit 1
+
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          echo "Deploy failed - rolling back EKS"
+          kubectl rollout undo deployment/identity-risk-engine -n production
+          kubectl rollout status deployment/identity-risk-engine -n production --timeout=120s
+          echo "Rollback complete"

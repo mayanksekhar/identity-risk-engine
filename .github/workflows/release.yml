@@ -1,0 +1,124 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+  attestations: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  release:
+    name: Create release with SBOM
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Syft
+        uses: anchore/sbom-action/download-syft@v0
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Tag and push release image
+        id: push
+        run: |
+          SHA_TAG="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-$(git rev-parse --short HEAD)"
+          RELEASE_TAG="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}"
+          docker pull "$SHA_TAG"
+          docker tag "$SHA_TAG" "$RELEASE_TAG"
+          docker push "$RELEASE_TAG"
+          DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$RELEASE_TAG" | cut -d@ -f2)
+          echo "digest=$DIGEST" >> $GITHUB_OUTPUT
+          echo "image-ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@$DIGEST" >> $GITHUB_OUTPUT
+
+      - name: Generate release SBOM
+        run: |
+          syft ${{ steps.push.outputs.image-ref }} \
+            -o cyclonedx-json=sbom-release-${{ github.ref_name }}.cdx.json
+          syft ${{ steps.push.outputs.image-ref }} \
+            -o spdx-json=sbom-release-${{ github.ref_name }}.spdx.json
+
+      - name: Sign release image
+        run: |
+          cosign sign --yes ${{ steps.push.outputs.image-ref }}
+
+      - name: Attest release SBOM
+        run: |
+          cosign attest --yes \
+            --predicate sbom-release-${{ github.ref_name }}.cdx.json \
+            --type cyclonedx \
+            ${{ steps.push.outputs.image-ref }}
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+
+      - name: Generate changelog from commits
+        id: changelog
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -n "$PREV_TAG" ]; then
+            CHANGELOG=$(git log --oneline "$PREV_TAG"..HEAD --no-merges)
+          else
+            CHANGELOG=$(git log --oneline HEAD~10..HEAD --no-merges)
+          fi
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGELOG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          body: |
+            ## Identity Risk Engine ${{ github.ref_name }}
+
+            ### What's changed
+            ${{ steps.changelog.outputs.changelog }}
+
+            ### Supply chain attestations
+            This release is signed and verifiable via Sigstore/Cosign:
+            ```bash
+            cosign verify \
+              --certificate-identity-regexp "https://github.com/${{ github.repository }}.*" \
+              --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+              ${{ steps.push.outputs.image-ref }}
+            ```
+
+            SBOM attestation:
+            ```bash
+            cosign verify-attestation \
+              --type cyclonedx \
+              --certificate-identity-regexp "https://github.com/${{ github.repository }}.*" \
+              --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+              ${{ steps.push.outputs.image-ref }}
+            ```
+
+            **Image:** `${{ steps.push.outputs.image-ref }}`
+          files: |
+            sbom-release-${{ github.ref_name }}.cdx.json
+            sbom-release-${{ github.ref_name }}.spdx.json
+          draft: false
+          prerelease: false
