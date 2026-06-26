@@ -1,4 +1,5 @@
 # Identity Risk Engine
+![CI](https://github.com/mayanksekhar/identity-risk-engine/actions/workflows/ci.yml/badge.svg)
 
 > Part of the [Thinkwerke](https://docs.thinkwerke.com) DevSecOps portfolio — Project 3 of the
 > Detect → Audit → Prevent arc. This is the real application deployed by the
