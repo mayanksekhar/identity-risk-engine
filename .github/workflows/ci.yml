@@ -41,7 +41,8 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # Job 2: SAST + SCA - Semgrep static analysis + Trivy filesystem scan
-  # Runs in parallel with gitleaks since both are source-only scans
+  # misconfig excluded: k8s pod specs enforce health/resource policy, not
+  # Dockerfile HEALTHCHECK instructions (which distroless images cannot use).
   # ---------------------------------------------------------------------------
   sast-sca:
     name: SAST + SCA
@@ -116,8 +117,9 @@ jobs:
           retention-days: 1
 
   # ---------------------------------------------------------------------------
-  # Job 4: Source SBOM (Level 1) - Syft on source dir before image build
-  # This is the "what did we intend to ship" baseline SBOM
+  # Job 4: Source SBOM (Level 1) - Syft on source dir before image build.
+  # Grype installed fresh each run to avoid stale vulnerability DB issue
+  # that occurs when using anchore/scan-action with its pinned Grype version.
   # ---------------------------------------------------------------------------
   source-sbom:
     name: Source SBOM (L1)
@@ -135,14 +137,14 @@ jobs:
       - name: Generate source SBOM (SPDX)
         run: syft dir:. -o spdx-json=sbom-source.spdx.json
 
+      - name: Install Grype (latest, fresh DB)
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh \
+            | sh -s -- -b /usr/local/bin
+          grype version
+
       - name: Scan source SBOM with Grype
-        id: grype-source
-        uses: anchore/scan-action@v4
-        with:
-          sbom: sbom-source.cdx.json
-          fail-build: true
-          severity-cutoff: high
-          output-format: table
+        run: grype sbom:sbom-source.cdx.json --fail-on high -o table
 
       - name: Upload source SBOMs
         uses: actions/upload-artifact@v4
@@ -203,9 +205,11 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # Job 6: Image SBOM (Level 2) + dual vulnerability gate
-  # Syft scans the pushed image - includes OS layer, not just go.mod deps
-  # Grype consumes the SBOM; Trivy scans the image independently
-  # Both must pass to proceed - dual gate for cross-validation
+  # Syft scans the pushed image - includes OS layer, not just go.mod deps.
+  # Grype consumes the SBOM directly (no re-pull needed).
+  # Trivy scans the image independently - different DB, different matching.
+  # Both must pass - dual gate for cross-validation.
+  # Grype installed fresh each run to avoid anchore/scan-action stale DB issue.
   # ---------------------------------------------------------------------------
   image-sbom-gate:
     name: Image SBOM + vuln gate (L2)
@@ -226,13 +230,14 @@ jobs:
           format: cyclonedx-json
           output-file: sbom-image.cdx.json
 
+      - name: Install Grype (latest, fresh DB)
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh \
+            | sh -s -- -b /usr/local/bin
+          grype version
+
       - name: Grype gate - scan image SBOM
-        uses: anchore/scan-action@v4
-        with:
-          sbom: sbom-image.cdx.json
-          fail-build: true
-          severity-cutoff: high
-          output-format: table
+        run: grype sbom:sbom-image.cdx.json --fail-on high -o table
 
       - name: Trivy image gate - independent cross-check
         uses: aquasecurity/trivy-action@master
@@ -261,9 +266,9 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # Job 7: Cosign keyless signing + SLSA provenance
-  # Both run together since both need the image digest and both are attestations
-  # Cosign: short-lived cert from Fulcio via GitHub OIDC, logged to Rekor
-  # SLSA: L3 provenance via slsa-github-generator (separate reusable workflow)
+  # Cosign: short-lived cert from Fulcio via GitHub OIDC, logged to Rekor.
+  # SLSA: GitHub-native build provenance attestation (actions/attest-build-provenance).
+  # Both produce attestation artifacts attached to the image in GHCR.
   # ---------------------------------------------------------------------------
   sign-attest:
     name: Sign + SLSA provenance
@@ -285,7 +290,7 @@ jobs:
       - name: Install Cosign
         uses: sigstore/cosign-installer@v3
 
-      - name: Download image SBOM attestation
+      - name: Download image SBOM
         uses: actions/download-artifact@v4
         with:
           name: sbom-image
