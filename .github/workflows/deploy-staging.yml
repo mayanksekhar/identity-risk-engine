@@ -80,12 +80,11 @@ jobs:
             --name ${{ secrets.EKS_CLUSTER_NAME }} \
             --region ${{ secrets.AWS_REGION }}
 
-      - name: Get staging service URL
+      - name: Get ALB URL
         id: svc
         run: |
-          SVC_URL=$(kubectl get svc identity-risk-engine -n staging \
-            -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
-          echo "url=http://$SVC_URL" >> $GITHUB_OUTPUT
+          echo "url=http://ire-alb-1051030364.us-east-1.elb.amazonaws.com" >> $GITHUB_OUTPUT
+          echo "Smoke testing: http://ire-alb-1051030364.us-east-1.elb.amazonaws.com"
 
       - name: Health check - /healthz
         run: |
