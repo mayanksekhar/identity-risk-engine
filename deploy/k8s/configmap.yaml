@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: identity-risk-engine-config
+  labels:
+    app.kubernetes.io/name: identity-risk-engine
+    app.kubernetes.io/component: config
+    thinkwerke.com/project: identity-risk-engine
+data:
+  PORT: "8080"
+  LLM_EXPLAIN_ENABLED: "false"
+  OLLAMA_BASE_URL: "http://ollama:11434"
+  OLLAMA_MODEL: "llama3.2"
+  LLM_TIMEOUT: "5s"

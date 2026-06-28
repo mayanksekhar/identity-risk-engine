@@ -1,0 +1,47 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: identity-risk-engine
+  labels:
+    app.kubernetes.io/name: identity-risk-engine
+    app.kubernetes.io/component: api
+    thinkwerke.com/project: identity-risk-engine
+  annotations:
+    # AWS Load Balancer Controller annotations for ALB target group registration.
+    # The 80/20 EKS/ECS weighted split is managed at the ALB level via Terraform
+    # weighted target groups — not here. This service registers EKS pods as one
+    # of the two target groups; the ECS task definition registers the other.
+    service.beta.kubernetes.io/aws-load-balancer-type: "external"
+    service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
+    service.beta.kubernetes.io/aws-load-balancer-target-type: "ip"
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-path: "/healthz"
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-interval-seconds: "10"
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-timeout-seconds: "5"
+    service.beta.kubernetes.io/aws-load-balancer-healthy-threshold-count: "2"
+    service.beta.kubernetes.io/aws-load-balancer-unhealthy-threshold-count: "3"
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: identity-risk-engine
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+---
+# PodDisruptionBudget - ensures at least 1 replica is available during
+# rolling deploys and node drains. Particularly important for the EKS
+# side of the weighted ALB split — a full outage of EKS pods during
+# a deploy would shift all traffic to ECS temporarily.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: identity-risk-engine
+  labels:
+    app.kubernetes.io/name: identity-risk-engine
+    thinkwerke.com/project: identity-risk-engine
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: identity-risk-engine

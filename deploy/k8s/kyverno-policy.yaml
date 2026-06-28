@@ -1,0 +1,114 @@
+# Kyverno ClusterPolicy: enforce supply chain integrity for production workloads
+#
+# This policy implements the gate described in docs/rfc-sbom-gated-pipeline.md:
+# no image is admitted to the production namespace unless it carries both:
+#   1. A valid Cosign keyless signature from the expected GitHub Actions workflow
+#   2. A valid CycloneDX SBOM attestation from the same workflow
+#
+# The policy uses Sigstore's keyless verification — no static public key needed.
+# The certificate identity and OIDC issuer claims are pinned to the exact
+# GitHub repository and Actions OIDC issuer, preventing any other workflow
+# (or manual cosign invocation) from producing an accepted signature.
+#
+# Why both signature AND attestation:
+# - Signature alone proves the image was signed by this workflow
+# - SBOM attestation proves the image was scanned and the scan result
+#   was attached at signing time — you can't have a valid attestation
+#   without having run the image-sbom-gate job that produced the SBOM
+#
+# Staging namespace is intentionally excluded — staging accepts images
+# that passed the CI gate but before they have been Kyverno-verified,
+# since Kyverno verification is the gate *before* production promotion.
+
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: identity-risk-engine-image-policy
+  annotations:
+    policies.kyverno.io/title: Identity Risk Engine Image Signature Policy
+    policies.kyverno.io/category: Supply Chain Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: >
+      Enforces that all pods in the production namespace use images
+      signed by the identity-risk-engine GitHub Actions CI pipeline,
+      with a valid CycloneDX SBOM attestation. Prevents unsigned,
+      unscanned, or manually-built images from reaching production.
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    # Rule 1: Verify Cosign keyless signature
+    - name: verify-image-signature
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - production
+      verifyImages:
+        - imageReferences:
+            - "ghcr.io/mayanksekhar/identity-risk-engine*"
+          attestors:
+            - entries:
+                - keyless:
+                    subject: "https://github.com/mayanksekhar/identity-risk-engine/.github/workflows/ci.yml@refs/heads/main"
+                    issuer: "https://token.actions.githubusercontent.com"
+                    rekor:
+                      url: https://rekor.sigstore.dev
+          mutateDigest: true
+          verifyDigest: true
+          required: true
+
+    # Rule 2: Verify CycloneDX SBOM attestation exists and is valid
+    - name: verify-sbom-attestation
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - production
+      verifyImages:
+        - imageReferences:
+            - "ghcr.io/mayanksekhar/identity-risk-engine*"
+          attestations:
+            - type: https://cyclonedx.org/bom
+              attestors:
+                - entries:
+                    - keyless:
+                        subject: "https://github.com/mayanksekhar/identity-risk-engine/.github/workflows/ci.yml@refs/heads/main"
+                        issuer: "https://token.actions.githubusercontent.com"
+              conditions:
+                - all:
+                    # Verify the SBOM is in CycloneDX format
+                    - key: "{{ bomFormat }}"
+                      operator: Equals
+                      value: "CycloneDX"
+          required: true
+
+    # Rule 3: Require digest-based image references in production
+    # Prevents floating tags like :latest from being used even if signed,
+    # since a tag can be moved to a different digest after signing.
+    - name: require-image-digest
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - production
+      validate:
+        message: >
+          Images in the production namespace must be referenced by digest
+          (e.g. image@sha256:...), not by tag. Floating tags are not
+          permitted even for signed images.
+        foreach:
+          - list: "request.object.spec.containers"
+            deny:
+              conditions:
+                any:
+                  - key: "{{ element.image }}"
+                    operator: NotContains
+                    value: "@sha256:"

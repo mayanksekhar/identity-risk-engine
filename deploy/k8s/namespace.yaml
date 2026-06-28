@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: staging
+  labels:
+    app.kubernetes.io/managed-by: kubectl
+    environment: staging
+    thinkwerke.com/project: identity-risk-engine
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: production
+  labels:
+    app.kubernetes.io/managed-by: kubectl
+    environment: production
+    thinkwerke.com/project: identity-risk-engine

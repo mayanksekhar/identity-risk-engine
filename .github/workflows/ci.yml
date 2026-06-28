@@ -35,14 +35,15 @@ jobs:
           fetch-depth: 0
 
       - name: Run Gitleaks
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@v2.3.9
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # ---------------------------------------------------------------------------
   # Job 2: SAST + SCA - Semgrep static analysis + Trivy filesystem scan
+  # semgrep-action@v1 uses semgrep/semgrep-action (rebranded from returntocorp).
   # misconfig excluded: k8s pod specs enforce health/resource policy, not
-  # Dockerfile HEALTHCHECK instructions (which distroless images cannot use).
+  # Dockerfile HEALTHCHECK instructions (distroless images cannot use HEALTHCHECK).
   # ---------------------------------------------------------------------------
   sast-sca:
     name: SAST + SCA
@@ -51,14 +52,14 @@ jobs:
       - uses: actions/checkout@v4.2.2
 
       - name: Semgrep SAST
-        uses: returntocorp/semgrep-action@v1
+        uses: semgrep/semgrep-action@v1.1.0
         with:
           config: auto
         env:
           SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
 
       - name: Trivy filesystem scan
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@0.31.0
         with:
           scan-type: fs
           scan-ref: .
@@ -69,7 +70,7 @@ jobs:
           output: trivy-fs-results.sarif
 
       - name: Upload Trivy SARIF to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: trivy-fs-results.sarif
@@ -96,6 +97,11 @@ jobs:
 
       - name: Vet
         run: go vet ./...
+
+      - name: Go vulnerability check (govulncheck)
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
 
       - name: Test with coverage
         run: go test ./... -v -coverprofile=coverage.out
@@ -129,7 +135,7 @@ jobs:
       - uses: actions/checkout@v4.2.2
 
       - name: Install Syft
-        uses: anchore/sbom-action/download-syft@v0
+        uses: anchore/sbom-action/download-syft@v0.18.0
 
       - name: Generate source SBOM (CycloneDX)
         run: syft dir:. -o cyclonedx-json=sbom-source.cdx.json
@@ -172,10 +178,10 @@ jobs:
       - uses: actions/checkout@v4.2.2
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v3.10.0
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@v3.4.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -183,7 +189,7 @@ jobs:
 
       - name: Extract metadata (tags, labels)
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v5.7.0
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
@@ -193,7 +199,7 @@ jobs:
 
       - name: Build and push
         id: push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v6.16.0
         with:
           context: .
           push: true
@@ -224,14 +230,14 @@ jobs:
     needs: [image-build]
     steps:
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@v3.4.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Generate image SBOM (CycloneDX)
-        uses: anchore/sbom-action@v0
+        uses: anchore/sbom-action@v0.18.0
         with:
           image: ${{ needs.image-build.outputs.image-ref }}
           format: cyclonedx-json
@@ -247,7 +253,7 @@ jobs:
         run: grype sbom:sbom-image.cdx.json --fail-on high -o table
 
       - name: Trivy image gate - independent cross-check
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@0.31.0
         with:
           image-ref: ${{ needs.image-build.outputs.image-ref }}
           scanners: vuln
@@ -258,7 +264,7 @@ jobs:
           output: trivy-image-results.sarif
 
       - name: Upload Trivy image SARIF
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: trivy-image-results.sarif
@@ -288,14 +294,14 @@ jobs:
       attestations: write
     steps:
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@v3.4.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Cosign
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@v3.8.2
 
       - name: Download image SBOM
         uses: actions/download-artifact@v4.3.0
