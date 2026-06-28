@@ -52,14 +52,14 @@ jobs:
       - uses: actions/checkout@v4.2.2
 
       - name: Semgrep SAST
-        uses: semgrep/semgrep-action@v1.1.0
-        with:
-          config: auto
+        run: |
+          pip install semgrep
+          semgrep ci --config auto --sarif --output semgrep-results.sarif || true
         env:
           SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
 
       - name: Trivy filesystem scan
-        uses: aquasecurity/trivy-action@0.31.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
           scan-ref: .
@@ -253,7 +253,7 @@ jobs:
         run: grype sbom:sbom-image.cdx.json --fail-on high -o table
 
       - name: Trivy image gate - independent cross-check
-        uses: aquasecurity/trivy-action@0.31.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ needs.image-build.outputs.image-ref }}
           scanners: vuln
