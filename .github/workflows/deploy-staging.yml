@@ -107,9 +107,18 @@ jobs:
 
       - name: API check - /api/v1/summary
         run: |
-          RESP=$(curl -s ${{ steps.svc.outputs.url }}/api/v1/summary)
-          echo "$RESP" | grep -q "total_identities" || (echo "API check failed: $RESP" && exit 1)
-          echo "API check OK"
+          sleep 15
+          for i in $(seq 1 5); do
+            RESP=$(curl -s ${{ steps.svc.outputs.url }}/api/v1/summary)
+            if echo "$RESP" | grep -q "total_identities"; then
+              echo "API check OK: $RESP"
+              exit 0
+            fi
+            echo "Attempt $i: got $RESP, retrying in 10s..."
+            sleep 10
+          done
+          echo "API check failed after 5 attempts"
+          exit 1
 
   # ---------------------------------------------------------------------------
   # Job 3: Post-deploy SBOM rescan - scan the live image in staging
