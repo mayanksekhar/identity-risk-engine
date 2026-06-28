@@ -188,8 +188,28 @@ jobs:
         with:
           release: v1.18.1
 
-      - name: Apply Kyverno image policy check
+      - name: Verify image signature (Cosign)
         run: |
-          kyverno apply deploy/k8s/kyverno-policy.yaml \
-            --resource deploy/k8s/deployment.yaml
-          echo "Kyverno policy gate passed - image approved for production"
+          IMAGE_REF="${{ needs.deploy-staging.outputs.image-ref }}"
+          cosign verify \
+            --certificate-identity-regexp "https://github.com/${{ github.repository }}.*" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            "$IMAGE_REF"
+          echo "Signature verification passed - image is signed by CI pipeline"
+
+      - name: Verify SBOM attestation (Cosign)
+        run: |
+          IMAGE_REF="${{ needs.deploy-staging.outputs.image-ref }}"
+          cosign verify-attestation \
+            --type cyclonedx \
+            --certificate-identity-regexp "https://github.com/${{ github.repository }}.*" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            "$IMAGE_REF" | jq -r ".payload | @base64d | fromjson | .predicateType"
+          echo "SBOM attestation verified - image has signed SBOM from CI pipeline"
+
+      - name: Confirm Kyverno cluster policy active
+        run: |
+          kubectl get clusterpolicy identity-risk-engine-image-policy
+          kubectl get clusterpolicy identity-risk-engine-image-policy \
+            -o jsonpath="{.status.conditions[0].message}"
+          echo "Kyverno policy gate active in cluster - production admission will enforce signature verification"
