@@ -22,18 +22,18 @@ autoModeConfig:
 #   terraform -chdir=deploy/terraform output vpc_id
 #   terraform -chdir=deploy/terraform output eks_subnet_ids
 vpc:
-  id: "REPLACE_WITH_TERRAFORM_OUTPUT_vpc_id"
+  id: "vpc-069b8fe5b9d4d938f"
   subnets:
     private:
       us-east-1a:
-        id: "REPLACE_WITH_TERRAFORM_OUTPUT_private_subnet_1"
+        id: "subnet-0faa436f76b4a6a60"
       us-east-1b:
-        id: "REPLACE_WITH_TERRAFORM_OUTPUT_private_subnet_2"
+        id: "subnet-0fe0c290a967a04c5"
     public:
       us-east-1a:
-        id: "REPLACE_WITH_TERRAFORM_OUTPUT_public_subnet_1"
+        id: "subnet-0809d7b95655bb2f4"
       us-east-1b:
-        id: "REPLACE_WITH_TERRAFORM_OUTPUT_public_subnet_2"
+        id: "subnet-0f61c3ff5c4c773a6"
 
 # OIDC provider - required for IAM Roles for Service Accounts (IRSA)
 # Used by the AWS Load Balancer Controller to manage ALB target groups

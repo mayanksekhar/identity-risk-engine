@@ -80,6 +80,8 @@ spec:
                     - keyless:
                         subject: "https://github.com/mayanksekhar/identity-risk-engine/.github/workflows/ci.yml@refs/heads/main"
                         issuer: "https://token.actions.githubusercontent.com"
+                        rekor:
+                          url: https://rekor.sigstore.dev
               conditions:
                 - all:
                     # Verify the SBOM is in CycloneDX format
