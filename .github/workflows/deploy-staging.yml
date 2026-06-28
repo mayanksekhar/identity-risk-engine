@@ -175,11 +175,9 @@ jobs:
           echo "SBOM attestation verification passed"
 
       - name: Install Kyverno CLI
-        run: |
-          curl -LO https://github.com/kyverno/kyverno/releases/latest/download/kyverno-cli_linux_amd64.tar.gz
-          tar -xzf kyverno-cli_linux_amd64.tar.gz
-          sudo mv kyverno /usr/local/bin/kyverno
-          kyverno version
+        uses: kyverno/action-install-cli@v0.2.0
+        with:
+          release: v1.18.1
 
       - name: Apply Kyverno image policy check
         run: |
