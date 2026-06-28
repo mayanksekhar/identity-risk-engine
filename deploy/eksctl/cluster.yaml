@@ -1,0 +1,95 @@
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+
+metadata:
+  name: ire-demo
+  region: us-east-1
+  version: "1.31"
+  tags:
+    Project: identity-risk-engine
+    Owner: mayanksekhar
+    ManagedBy: eksctl
+    CostCenter: thinkwerke-portfolio
+
+# Explicitly disable auto mode - maintain current behavior
+# (auto mode would remove managed node groups and networking addons)
+autoModeConfig:
+  enabled: false
+
+# Use existing VPC created by Terraform (ire-vpc)
+# VPC and subnet IDs are outputs from deploy/terraform/main.tf
+# Replace these placeholder values after running terraform apply:
+#   terraform -chdir=deploy/terraform output vpc_id
+#   terraform -chdir=deploy/terraform output eks_subnet_ids
+vpc:
+  id: "REPLACE_WITH_TERRAFORM_OUTPUT_vpc_id"
+  subnets:
+    private:
+      us-east-1a:
+        id: "REPLACE_WITH_TERRAFORM_OUTPUT_private_subnet_1"
+      us-east-1b:
+        id: "REPLACE_WITH_TERRAFORM_OUTPUT_private_subnet_2"
+    public:
+      us-east-1a:
+        id: "REPLACE_WITH_TERRAFORM_OUTPUT_public_subnet_1"
+      us-east-1b:
+        id: "REPLACE_WITH_TERRAFORM_OUTPUT_public_subnet_2"
+
+# OIDC provider - required for IAM Roles for Service Accounts (IRSA)
+# Used by the AWS Load Balancer Controller to manage ALB target groups
+iam:
+  withOIDC: true
+  serviceAccounts:
+    # AWS Load Balancer Controller - manages the ALB and target group
+    # registrations for the 80/20 weighted split
+    - metadata:
+        name: aws-load-balancer-controller
+        namespace: kube-system
+      wellKnownPolicies:
+        awsLoadBalancerController: true
+
+    # identity-risk-engine service account - for future S3/SSM access
+    - metadata:
+        name: identity-risk-engine
+        namespace: production
+      attachPolicyARNs:
+        - arn:aws:iam::aws:policy/AmazonSSMReadOnlyAccess
+
+managedNodeGroups:
+  - name: ire-nodes
+    instanceType: t3.small
+    minSize: 2
+    maxSize: 3
+    desiredCapacity: 2
+    volumeSize: 20
+    # Private subnets only - nodes not directly exposed to internet
+    privateNetworking: true
+    labels:
+      role: worker
+      project: identity-risk-engine
+    tags:
+      Project: identity-risk-engine
+      Owner: mayanksekhar
+      # Required for AWS Load Balancer Controller to discover nodes
+      k8s.io/cluster-autoscaler/enabled: "true"
+      k8s.io/cluster-autoscaler/ire-demo: "owned"
+    iam:
+      attachPolicyARNs:
+        - arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy
+        - arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+addons:
+  - name: vpc-cni
+    version: latest
+  - name: coredns
+    version: latest
+  - name: kube-proxy
+    version: latest
+
+cloudWatch:
+  clusterLogging:
+    enableTypes:
+      - audit
+      - authenticator
