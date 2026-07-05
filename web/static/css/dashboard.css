@@ -10,6 +10,8 @@
   --green: #3ecf8e;
   --red: #e5534b;
   --yellow: #d9a23a;
+  --blue: #6f9fe0;
+  --purple: #a78bd6;
   font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
 }
 
@@ -60,7 +62,7 @@ nav { display: flex; flex-direction: column; gap: 4px; }
 .sidebar-footer .dim { color: var(--text-dim); }
 .sidebar-footer code { color: var(--accent); }
 
-.content { flex: 1; padding: 32px 40px; max-width: 1100px; }
+.content { flex: 1; padding: 32px 40px; max-width: 1200px; }
 
 .page-header { margin-bottom: 28px; }
 .page-header h1 { font-size: 22px; font-weight: 700; }
@@ -119,6 +121,9 @@ table.risk-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .id-sub { color: var(--text-dim); font-size: 11px; }
 .score-cell { font-weight: 700; }
 
+.owasp-cell { display: flex; flex-wrap: wrap; gap: 4px; max-width: 220px; }
+.dim-text { color: var(--text-dim); font-size: 12px; }
+
 .pill {
   display: inline-block;
   padding: 2px 8px;
@@ -126,9 +131,11 @@ table.risk-table { width: 100%; border-collapse: collapse; font-size: 13px; }
   font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
+  white-space: nowrap;
+  cursor: default;
 }
-.pill-type-human { background: #243047; color: #6f9fe0; }
-.pill-type-nhi { background: #2a2640; color: #a78bd6; }
+.pill-type-human { background: #243047; color: var(--blue); }
+.pill-type-nhi { background: #2a2640; color: var(--purple); }
 .pill-type-agent { background: #2c2418; color: var(--accent); }
 
 .pill-sev-low { background: #163b2c; color: var(--green); }
@@ -136,8 +143,32 @@ table.risk-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .pill-sev-high { background: #3d2615; color: var(--accent); }
 .pill-sev-critical { background: #3d1816; color: var(--red); }
 
-@media (max-width: 800px) {
+/* OWASP NHI Top 10 badges - distinct teal so they read as a standard
+   reference, not another severity indicator. Hover shows the full risk
+   title via the title attribute. */
+.pill-owasp {
+  background: #0d3b3b;
+  color: #4fd1c5;
+  border: 1px solid #1a5f5c;
+  text-transform: none;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+
+/* Frontier risks - agentic-autonomy factors the OWASP NHI Top 10 (2025)
+   does not yet name. Deliberately styled differently from pill-owasp so
+   it never reads as an official OWASP category. */
+.pill-frontier {
+  background: #2d1f3d;
+  color: #b48ce0;
+  border: 1px dashed #5a3d7a;
+  text-transform: none;
+  font-style: italic;
+}
+
+@media (max-width: 900px) {
   .cards { grid-template-columns: repeat(2, 1fr); }
   .sidebar { width: 64px; }
   .nav-item span, .brand-name { display: none; }
+  .owasp-cell { max-width: 140px; }
 }
