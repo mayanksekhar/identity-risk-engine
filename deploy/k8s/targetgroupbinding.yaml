@@ -1,0 +1,10 @@
+apiVersion: elbv2.k8s.aws/v1beta1
+kind: TargetGroupBinding
+metadata:
+  name: identity-risk-engine
+spec:
+  serviceRef:
+    name: identity-risk-engine
+    port: 80
+  targetGroupARN: arn:aws:elasticloadbalancing:us-east-1:311601424828:targetgroup/ire-eks-tg/4d88d9ffe6b373d2
+  targetType: ip
