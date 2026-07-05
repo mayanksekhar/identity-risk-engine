@@ -32,11 +32,13 @@ type Factor struct {
 
 // Score is the full scoring result for one identity at a point in time.
 type Score struct {
-	IdentityID string    `json:"identity_id"`
-	Total      int       `json:"total"`      // clamped 0-100
-	Severity   Severity   `json:"severity"`
-	Factors    []Factor  `json:"factors"`
-	ScoredAt   time.Time `json:"scored_at"`
+	IdentityID    string         `json:"identity_id"`
+	Total         int            `json:"total"` // clamped 0-100
+	Severity      Severity       `json:"severity"`
+	Factors       []Factor       `json:"factors"`
+	ScoredAt      time.Time      `json:"scored_at"`
+	OWASPRisks    []OWASPNHIRisk `json:"owasp_nhi_risks,omitempty"`
+	OWASPFrontier []string       `json:"owasp_frontier_notes,omitempty"`
 }
 
 // staleThresholds defines days-since-active thresholds per identity type.
@@ -145,12 +147,16 @@ func (e *Engine) Score(id identity.Identity) Score {
 
 	sort.Slice(factors, func(i, j int) bool { return factors[i].Weight > factors[j].Weight })
 
+	owaspRisks, frontierNotes := OWASPRisksForFactors(factors)
+
 	return Score{
-		IdentityID: id.ID,
-		Total:      total,
-		Severity:   severityFor(total),
-		Factors:    factors,
-		ScoredAt:   now,
+		IdentityID:    id.ID,
+		Total:         total,
+		Severity:      severityFor(total),
+		Factors:       factors,
+		ScoredAt:      now,
+		OWASPRisks:    owaspRisks,
+		OWASPFrontier: frontierNotes,
 	}
 }
 
