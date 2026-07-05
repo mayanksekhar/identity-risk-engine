@@ -39,6 +39,7 @@ type Score struct {
 	ScoredAt      time.Time      `json:"scored_at"`
 	OWASPRisks    []OWASPNHIRisk `json:"owasp_nhi_risks,omitempty"`
 	OWASPFrontier []string       `json:"owasp_frontier_notes,omitempty"`
+	ASIRisks      []ASIRisk      `json:"owasp_agentic_risks,omitempty"`
 }
 
 // staleThresholds defines days-since-active thresholds per identity type.
@@ -148,6 +149,7 @@ func (e *Engine) Score(id identity.Identity) Score {
 	sort.Slice(factors, func(i, j int) bool { return factors[i].Weight > factors[j].Weight })
 
 	owaspRisks, frontierNotes := OWASPRisksForFactors(factors)
+	asiRisks := ASIRisksForFactors(factors)
 
 	return Score{
 		IdentityID:    id.ID,
@@ -157,6 +159,7 @@ func (e *Engine) Score(id identity.Identity) Score {
 		ScoredAt:      now,
 		OWASPRisks:    owaspRisks,
 		OWASPFrontier: frontierNotes,
+		ASIRisks:      asiRisks,
 	}
 }
 
