@@ -76,3 +76,79 @@ Open:
 * 23 November 2026: reuse the Mons dataset for Cohort A, to save collection time and improve reproducibility. Accepted cost: popularity bias.
 * 23 November 2026: exclude bot version bumps and define gain by owner/repo path, since bots account for most version updates in the source study.
 * 23 November 2026: pin dataset version 2026-05-22 (Zenodo record 20340547, CC BY 4.0). Observation window 26 March 2025 to 26 March 2026. Star threshold corrected to 100, from the record, not the paper.
+
+## 12. Frozen operationalization (v0.4)
+
+Status: frozen on 23 November 2026, after the 1,000 history pilot and before
+any output of the full run was read. The pilot histories (the first 1,000 of
+the sorted uid list shuffled with seed 20261123) are excluded from every
+confirmatory estimate. Any later change to this section is a dated amendment
+with a reason, and the affected analysis is labelled as post hoc.
+
+### 12.1 Window and exposure
+The window runs from 2025-03-26 00:00:00 UTC to 2026-03-26 23:59:59 UTC.
+committed_date is epoch seconds in UTC. A history enters exposure at the later
+of the window start and its first commit. It leaves at the earlier of the
+window end and its delete commit. Histories deleted before the window are
+excluded and counted. Histories with no in window change stay in as zero event
+exposure. The rate is drift events divided by exposure days over 90.
+
+### 12.2 Ordering
+Rows are sorted by committed_date. The CSV direction is detected per history
+and reversed when it is newest first, then the sort is stable. Histories with
+timestamp ties are counted, and a sensitivity analysis drops them.
+
+### 12.3 State and baseline
+The baseline is the last content version before the window start. A history
+added inside the window uses its first content version as the baseline, which
+is not an event. A rename row with an empty file_hash leaves state unchanged.
+A delete row ends the history. Pin changes alone are not events.
+
+### 12.4 Parsing
+Files are parsed with the PyYAML safe loader. An unparsable version is skipped
+and the last good state is carried forward. The count of unparsable versions
+is reported per history and in total.
+
+### 12.5 Reach set
+The reach set is the set of owner/repo[/path] strings, lowercased with the ref
+removed, taken from job level uses and step level uses. Local paths (./) and
+docker:// images are excluded. The primary analysis counts third party reach,
+meaning every owner except the official owners actions and github. The
+sensitivity analysis counts all external owners.
+
+### 12.6 Tier
+Each permissions value maps to a level: none 0, read 1, default 2, write 3.
+Missing permissions mean default. A job level permissions block overrides the
+workflow level block. The tier is two times the highest level across jobs,
+plus one when any scope sets id-token to write. This is our operationalization.
+Alignment with the definition used by nhi-scan is pending, and results are
+reported as ours.
+
+### 12.7 Events
+A drift event is a commit by a non bot author with a third party reach gain
+greater than zero and an unchanged tier. A visible growth event is the same
+with the tier raised. Other combinations are reported but are not primary.
+
+### 12.8 Pin types
+sha is 40 hex characters. full starts with digits, a dot and digits, with an
+optional leading v. major is an optional v plus digits only. branch is
+everything else, including a missing ref. When one action appears more than
+once in a file, the weakest pin is kept.
+
+### 12.9 Bots
+A commit is a bot commit when the lowercased author name plus author email
+contains any of: dependabot, renovate, [bot], github-actions, greenkeeper,
+snyk-bot. Only the flag is released, never names or emails.
+
+### 12.10 Estimands and inference
+The primary estimand is the Reach Drift Rate per history per 90 days.
+Prevalence is the share of exposed histories with at least one drift event.
+Intervals are 95 percent percentile intervals from a cluster bootstrap by
+repository with 10,000 resamples.
+
+## 11a. Decision log additions
+- 2026-11-23: pilot of 1,000 histories run to debug the extractor only. 791
+  had exposure, 10 of 4,156 files were unparsable, none were missing.
+- 2026-11-23: section 12 frozen before reading full run output.
+- 2026-11-23: primary reach scope set to third party (non official owners) to
+  match the wording of section 2. All external owners is a sensitivity analysis.
