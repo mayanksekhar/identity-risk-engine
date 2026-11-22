@@ -8,6 +8,7 @@ Standard library only.
 Usage: python3 scripts/profile_dataset.py [path/to/workflows.csv.gz]
 """
 import csv
+from datetime import datetime, timezone
 import gzip
 import os
 import re
@@ -81,6 +82,8 @@ def main():
 
             d = (r.get("committed_date") or "").strip()
             date_shapes[shape(d)] += 1
+            if d.isdigit():
+                d = datetime.fromtimestamp(int(d), timezone.utc).strftime("%Y-%m-%d")
             if re.match(r"\d{4}-\d{2}-\d{2}", d):
                 day = d[:10]
                 if min_date is None or day < min_date:
