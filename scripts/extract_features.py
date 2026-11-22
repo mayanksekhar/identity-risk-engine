@@ -138,6 +138,8 @@ def main():
     ap.add_argument("--tar", default=os.path.join(home, "workflows.tar.gz"))
     ap.add_argument("--out", required=True)
     ap.add_argument("--pilot", type=int, default=0)
+    ap.add_argument("--exclude-pilot", type=int, default=0,
+                    help="drop the first N histories of the seeded shuffle (the held out pilot)")
     ap.add_argument("--seed", type=int, default=20261123)
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
@@ -145,15 +147,20 @@ def main():
 
     # Pass 1: choose histories.
     selected = None
-    if a.pilot:
+    excluded = set()
+    if a.pilot or a.exclude_pilot:
         uids = set()
         with gzip.open(a.csv, "rt", encoding="utf-8", errors="replace", newline="") as fh:
             for r in csv.DictReader(fh):
                 uids.add(r["uid"])
         pool = sorted(uids)
         random.Random(a.seed).shuffle(pool)
-        selected = set(pool[:a.pilot])
-        print("pilot histories selected:", len(selected), "seed", a.seed)
+        if a.pilot:
+            selected = set(pool[:a.pilot])
+            print("pilot histories selected:", len(selected), "seed", a.seed)
+        if a.exclude_pilot:
+            excluded = set(pool[:a.exclude_pilot])
+            print("held out pilot histories excluded:", len(excluded), "seed", a.seed)
 
     # Pass 2: collect rows for selected histories.
     rows = {}
@@ -162,6 +169,8 @@ def main():
         for r in csv.DictReader(fh):
             u = r["uid"]
             if selected is not None and u not in selected:
+                continue
+            if u in excluded:
                 continue
             try:
                 ep = int((r["committed_date"] or "0").strip())
