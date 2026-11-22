@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Validation Labeler</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--ink:#16191d;--mute:#5b6570;--line:#d9dde3;--acc:#0b6bcb;--add:#e6f6ea;--addi:#15692e;--del:#fdeaea;--deli:#a12020;--ok:#1b7f3b}
+@media (prefers-color-scheme:dark){:root{--bg:#14171b;--card:#1c2026;--ink:#e8ebef;--mute:#9aa4b0;--line:#323943;--acc:#5aa8ff;--add:#17301f;--addi:#7bd98f;--del:#3a1c1c;--deli:#ff9a9a;--ok:#6fd48b}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,sans-serif}
+header{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:10px 16px;background:var(--card);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:2}
+header .grow{flex:1}
+button,select,textarea,input[type=file]{font:inherit;color:inherit}
+button{border:1px solid var(--line);background:var(--card);border-radius:8px;padding:7px 12px;cursor:pointer}
+button:hover{border-color:var(--acc)}
+button.primary{background:var(--acc);border-color:var(--acc);color:#fff}
+button.sel{outline:2px solid var(--acc);font-weight:600}
+main{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(280px,1fr);gap:16px;padding:16px;max-width:1500px;margin:0 auto}
+@media (max-width:900px){main{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px}
+h2{margin:0 0 8px;font-size:15px}
+.meta{display:grid;grid-template-columns:110px 1fr;gap:4px 10px}
+.meta div:nth-child(odd){color:var(--mute)}
+code,pre{font:13px/1.4 ui-monospace,Menlo,Consolas,monospace}
+pre{margin:0;overflow:auto;max-height:60vh;border:1px solid var(--line);border-radius:8px}
+pre span{display:block;padding:0 8px;white-space:pre}
+.a{background:var(--add);color:var(--addi)}.d{background:var(--del);color:var(--deli)}.h{color:var(--mute)}
+.row{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}
+textarea{width:100%;min-height:70px;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px}
+select{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:7px}
+.bar{height:6px;background:var(--line);border-radius:3px;overflow:hidden;min-width:140px}
+.bar i{display:block;height:100%;background:var(--ok)}
+.mute{color:var(--mute)}
+.hide{display:none}
+a{color:var(--acc)}
+#empty{padding:40px 16px;text-align:center}
+</style>
+</head>
+<body>
+<header>
+  <input type="file" id="file" accept=".csv">
+  <span id="pos" class="mute"></span>
+  <div class="bar"><i id="barfill" style="width:0"></i></div>
+  <span id="count" class="mute"></span>
+  <span class="grow"></span>
+  <button id="nextun">Next unlabeled</button>
+  <button id="export" class="primary">Export CSV</button>
+</header>
+<div id="empty">Load your rater sheet (rater_sheet_A.csv or rater_sheet_B.csv). Progress is saved in this browser.</div>
+<main id="ui" class="hide">
+  <section class="card">
+    <h2>Change</h2>
+    <div class="meta" id="meta"></div>
+    <h2 style="margin-top:14px">Diff</h2>
+    <pre id="diff"></pre>
+  </section>
+  <section class="card">
+    <h2>Did this commit introduce a genuinely new third party dependency?</h2>
+    <div class="row" id="labels"></div>
+    <div id="fpbox" class="hide">
+      <div class="mute">False positive reason</div>
+      <div class="row"><select id="fp"></select></div>
+    </div>
+    <div class="mute">Reach type if you found a dependency the added list does not show</div>
+    <div class="row"><select id="rt"></select></div>
+    <div class="mute">Notes</div>
+    <textarea id="notes"></textarea>
+    <div class="row">
+      <button id="prev">Previous</button><button id="next">Next</button>
+      <span class="mute" id="secs"></span>
+    </div>
+    <p class="mute" style="font-size:13px">Keys: 1 true_reach_gain, 2 false_positive, 3 ambiguous, right and left arrows to move. Codebook: docs/validation-codebook.md</p>
+  </section>
+</main>
+<script>
+"use strict";
+var LABELS=["true_reach_gain","false_positive","ambiguous"];
+var FPS=["","FP_SELF","FP_PARSE","FP_RENAME","FP_MOVED","FP_REVERT","FP_OTHER"];
+var RTS=["","action","reusable_workflow","docker_image","script_fetch","other"];
+var COLS=["item_id","repository","file_path","commit_hash","commit_utc","actions_added","actions_removed","diff","label","fp_reason","reach_type","notes","seconds"];
+var items=[],idx=0,storeKey="",lastActive=Date.now();
+function $(i){return document.getElementById(i)}
+function parseCSV(t){var rows=[],row=[],f="",q=false,i=0,c;
+ while(i<t.length){c=t[i];
+  if(q){ if(c=='"'){ if(t[i+1]=='"'){f+='"';i++} else q=false } else f+=c }
+  else if(c=='"') q=true;
+  else if(c==","){row.push(f);f=""}
+  else if(c=="\n"){row.push(f);rows.push(row);row=[];f=""}
+  else if(c!="\r") f+=c;
+  i++}
+ if(f.length||row.length){row.push(f);rows.push(row)}
+ return rows}
+function esc(v){v=String(v==null?"":v);return /[",\n\r]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v}
+function save(){try{localStorage.setItem(storeKey,JSON.stringify(items.map(function(x){return [x.label,x.fp_reason,x.reach_type,x.notes,x.seconds]})))}catch(e){}}
+function load(){try{var s=localStorage.getItem(storeKey);if(!s)return;var a=JSON.parse(s);
+ a.forEach(function(r,i){if(items[i]){items[i].label=r[0];items[i].fp_reason=r[1];items[i].reach_type=r[2];items[i].notes=r[3];items[i].seconds=r[4]||0}})}catch(e){}}
+function fillSelect(el,arr){el.innerHTML="";arr.forEach(function(v){var o=document.createElement("option");o.value=v;o.textContent=v||"(none)";el.appendChild(o)})}
+function render(){
+ var it=items[idx];
+ $("pos").textContent="Item "+(idx+1)+" of "+items.length;
+ var done=items.filter(function(x){return x.label}).length;
+ $("count").textContent=done+" labeled";
+ $("barfill").style.width=(100*done/items.length)+"%";
+ var m=$("meta");m.innerHTML="";
+ function add(k,v,link){var a=document.createElement("div");a.textContent=k;var b=document.createElement("div");
+  if(link){var l=document.createElement("a");l.href=link;l.target="_blank";l.rel="noopener";l.textContent=v;b.appendChild(l)}else b.textContent=v;
+  m.appendChild(a);m.appendChild(b)}
+ add("Repository",it.repository,"https://github.com/"+it.repository);
+ add("File",it.file_path);
+ add("Commit",it.commit_hash,"https://github.com/"+it.repository+"/commit/"+it.commit_hash);
+ add("Date (UTC)",it.commit_utc);
+ add("Actions added",it.actions_added||"(none listed)");
+ add("Actions removed",it.actions_removed||"(none listed)");
+ var d=$("diff");d.innerHTML="";
+ (it.diff||"").split("\n").forEach(function(line){var s=document.createElement("span");
+  s.textContent=line||" ";
+  if(line.indexOf("+++")==0||line.indexOf("---")==0)s.className="h";
+  else if(line[0]=="+")s.className="a";else if(line[0]=="-")s.className="d";else if(line.indexOf("@@")==0)s.className="h";
+  d.appendChild(s)});
+ var lb=$("labels");lb.innerHTML="";
+ LABELS.forEach(function(l,i){var b=document.createElement("button");b.textContent=(i+1)+"  "+l;
+  if(it.label==l)b.className="sel";b.onclick=function(){setLabel(l)};lb.appendChild(b)});
+ $("fpbox").className=it.label=="false_positive"?"":"hide";
+ $("fp").value=it.fp_reason||"";$("rt").value=it.reach_type||"";$("notes").value=it.notes||"";
+ $("secs").textContent=Math.round(it.seconds||0)+" s on this item";
+}
+function setLabel(l){var it=items[idx];it.label=l;if(l!="false_positive")it.fp_reason="";save();render()}
+function go(n){if(n<0||n>=items.length)return;idx=n;render();window.scrollTo(0,0)}
+function nextUn(){for(var k=1;k<=items.length;k++){var j=(idx+k)%items.length;if(!items[j].label){go(j);return}}}
+$("file").onchange=function(e){var f=e.target.files[0];if(!f)return;
+ var r=new FileReader();r.onload=function(){
+  var rows=parseCSV(r.result);var h=rows.shift();
+  items=rows.filter(function(x){return x.length>1}).map(function(x){var o={};h.forEach(function(k,i){o[k]=x[i]||""});
+   o.seconds=0;return o});
+  storeKey="labeler:"+f.name+":"+items.length+":"+(items[0]?items[0].item_id:"");
+  load();idx=0;
+  $("empty").className="hide";$("ui").className="";render()};
+ r.readAsText(f)};
+$("fp").onchange=function(){items[idx].fp_reason=$("fp").value;save()};
+$("rt").onchange=function(){items[idx].reach_type=$("rt").value;save()};
+$("notes").oninput=function(){items[idx].notes=$("notes").value;save()};
+$("prev").onclick=function(){go(idx-1)};$("next").onclick=function(){go(idx+1)};$("nextun").onclick=nextUn;
+$("export").onclick=function(){
+ var bad=items.filter(function(x){return x.label=="false_positive"&&!x.fp_reason}).length;
+ var un=items.filter(function(x){return !x.label}).length;
+ if((bad||un)&&!confirm(un+" unlabeled and "+bad+" false positives without a reason. Export anyway?"))return;
+ var out=[COLS.join(",")];
+ items.forEach(function(x){out.push(COLS.map(function(c){return esc(x[c])}).join(","))});
+ var blob=new Blob([out.join("\n")+"\n"],{type:"text/csv"});
+ var a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="labeled_"+($("file").files[0]?$("file").files[0].name:"sheet.csv");
+ document.body.appendChild(a);a.click();a.remove()};
+document.addEventListener("keydown",function(e){lastActive=Date.now();
+ if(!items.length||/TEXTAREA|SELECT/.test(e.target.tagName))return;
+ if(e.key=="1")setLabel(LABELS[0]);else if(e.key=="2")setLabel(LABELS[1]);else if(e.key=="3")setLabel(LABELS[2]);
+ else if(e.key=="ArrowRight")go(idx+1);else if(e.key=="ArrowLeft")go(idx-1)});
+document.addEventListener("mousemove",function(){lastActive=Date.now()});
+setInterval(function(){if(!items.length||document.hidden||Date.now()-lastActive>90000)return;
+ items[idx].seconds=(items[idx].seconds||0)+1;$("secs").textContent=Math.round(items[idx].seconds)+" s on this item";
+ if(items[idx].seconds%10==0)save()},1000);
+fillSelect($("fp"),FPS);fillSelect($("rt"),RTS);
+</script>
+</body>
+</html>
