@@ -55,10 +55,17 @@ for name in "${ORDER[@]}"; do
 
   echo "downloading $name"
   url="https://zenodo.org/records/${RECORD}/files/${name}?download=1"
-  if ! curl -L --fail --retry 5 -C - -o "$out.part" "$url"; then
-    # A rerun on a complete part file makes the server answer 416, so verify what we have.
-    [[ -f "$out.part" ]] || { echo "download failed: $name" >&2; exit 1; }
-  fi
+  ok=0
+  for attempt in 1 2 3 4 5 6 7 8; do
+    rc=0
+    curl -L --fail -C - -o "$out.part" "$url" || rc=$?
+    if (( rc == 0 )); then ok=1; break; fi
+    # 22 and 33 mean the server refused to resume because the part file is already complete (HTTP 416)
+    if (( rc == 22 || rc == 33 )) && [[ -f "$out.part" ]]; then ok=1; break; fi
+    echo "interrupted (curl exit $rc), resuming, attempt $attempt of 8" >&2
+    sleep 5
+  done
+  (( ok == 1 )) || { echo "download did not finish for $name. Rerun to resume." >&2; exit 2; }
 
   if accept_part "$want" "$out"; then
     echo "ok: $name"
