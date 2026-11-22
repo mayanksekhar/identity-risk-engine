@@ -152,3 +152,16 @@ repository with 10,000 resamples.
 - 2026-11-23: section 12 frozen before reading full run output.
 - 2026-11-23: primary reach scope set to third party (non official owners) to
   match the wording of section 2. All external owners is a sensitivity analysis.
+
+### 12.11 Validation sampling design (added 23 November 2026, before sampling)
+Frame: events written by the full run, non bot, excluding the held out pilot.
+Flagged sample: 200 events drawn uniformly at random from primary drift events,
+seed 20261129. Unflagged sample: 200 events, 40 each from five strata, drawn
+uniformly with the same seed: visible growth (third party gain, tier up), gain
+with tier down, official only gain, loss only, and tier only changes. Stratum
+sizes are stored for weighting. Items are judged with docs/validation-codebook.md.
+A calibration set of about 40 items drawn from the held out pilot events
+(different histories from the confirmatory sample) is labeled first and used
+only to refine the codebook. Precision is the share of flagged items labeled
+true_reach_gain, with a Wilson 95% interval. The miss rate is the stratum weighted
+share of unflagged items labeled true_reach_gain, with per stratum Wilson intervals.
